@@ -15,9 +15,17 @@ class Purchase extends Model
     {
     	return $this->belongsTo('App\Supplier');
     }
+    public function user()
+    {
+    	return $this->belongsTo('App\User');
+    }
 
     public function warehouse()
     {
     	return $this->belongsTo('App\Warehouse');
+    }
+    public function products()
+    {
+    	return $this->hasMany('App\ProductPurchase');
     }
 }

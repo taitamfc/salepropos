@@ -113,7 +113,7 @@
                 <div class="col-md-6">
                     <div class="form-group">
                         <label> <?php echo e(trans('file.Sample File')); ?></label>
-                        <a href="public/sample_file/sample_customer.csv" class="btn btn-info btn-block btn-md"><i class="dripicons-download"></i>  <?php echo e(trans('file.Download')); ?></a>
+                        <a href="sample_file/sample_customer.csv" class="btn btn-info btn-block btn-md"><i class="dripicons-download"></i>  <?php echo e(trans('file.Download')); ?></a>
                     </div>
                 </div>
             </div>

@@ -4,29 +4,32 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use App\Product;
-use App\Http\Resources\ProductResource;
+use App\Unit;
+use App\Http\Resources\UnitResource;
 
-
-class ProductController extends Controller
+class UnitController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        $items = Product::query(true);
-
-        $items = $items->paginate(20);
-        return ProductResource::collection($items);
+        $limit = $request->limit ?? 20;
+        $items = Unit::query(true);
+        if( $limit != -1 ){
+            $items = $items->paginate(20);
+        }else{
+            $items = $items->all();
+        }
+        return UnitResource::collection($items);
     }
-    public function show($id)
+	public function show($id)
     {
-        $item = Product::find($id);
-        return new ProductResource($item);
+        $item = Unit::find($id);
+        return new UnitResource($item);
     }
 	
 	public function store(Request $request)
     {
         $data = $request->except(['_token','_method']);
-        $saved = Product::create($data);
+        $saved = Unit::create($data);
         return response()->json([
             'success' => true,
             'data' => $saved
@@ -36,7 +39,7 @@ class ProductController extends Controller
 	public function update($id,Request $request)
     {
         $data = $request->except(['_token','_method']);
-        $saved = Product::find($id)->update($data);
+        $saved = Unit::find($id)->update($data);
         return response()->json([
             'success' => true,
             'data' => $saved
@@ -45,7 +48,7 @@ class ProductController extends Controller
 	
 	public function destroy($id)
     {
-        $item = Product::find($id)->delete();
+        $item = Unit::find($id)->delete();
         return response()->json([
             'success' => true,
             'data' => $item
