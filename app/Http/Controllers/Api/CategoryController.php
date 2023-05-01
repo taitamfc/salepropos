@@ -11,7 +11,7 @@ class CategoryController extends Controller
 {
     public function index()
     {
-        $items = Category::query(true);
+        $items = Category::query(true)->orderBy('id','DESC');
 
         $items = $items->paginate(20);
         return CategoryResource::collection($items);

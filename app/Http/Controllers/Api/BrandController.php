@@ -12,7 +12,7 @@ class BrandController extends Controller
     public function index(Request $request)
     {
         $limit = $request->limit ?? 20;
-        $items = Brand::query(true);
+        $items = Brand::query(true)->orderBy('id','DESC');
         if( $limit != -1 ){
             $items = $items->paginate(20);
         }else{

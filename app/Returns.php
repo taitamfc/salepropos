@@ -30,4 +30,8 @@ class Returns extends Model
     {
     	return $this->belongsTo('App\User');
     }
+    public function products()
+    {
+    	return $this->hasMany('App\ProductReturn','return_id');
+    }
 }

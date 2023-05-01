@@ -24,3 +24,8 @@ Route::apiResource('purchases',Api\PurchaseController::class);
 Route::apiResource('unit',Api\UnitController::class);
 Route::apiResource('warehouse',Api\WarehouseController::class);
 Route::apiResource('supplier',Api\SupplierController::class);
+Route::apiResource('accounts',Api\AccountController::class);
+Route::apiResource('transfers',Api\TransferController::class);
+Route::apiResource('adjustment',Api\AdjustmentController::class);
+Route::apiResource('sales',Api\SaleController::class);
+Route::apiResource('return-sales',Api\ReturnSaleController::class);

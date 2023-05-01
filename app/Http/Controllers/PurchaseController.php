@@ -28,6 +28,7 @@ use Illuminate\Support\Facades\Validator;
 
 class PurchaseController extends Controller
 {
+ 
     public function index(Request $request)
     {
         $role = Role::find(Auth::user()->role_id);
@@ -349,7 +350,6 @@ class PurchaseController extends Controller
     public function store(Request $request)
     {
         $data = $request->except('document');
-        //return dd($data);
         $data['user_id'] = Auth::id();
         $data['reference_no'] = 'pr-' . date("Ymd") . '-'. date("his");
         $document = $request->document;

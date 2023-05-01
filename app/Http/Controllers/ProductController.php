@@ -138,7 +138,7 @@ class ProductController extends Controller
                     $nestedData['brand'] = $product->brand->title;
                 else
                     $nestedData['brand'] = "N/A";
-                $nestedData['category'] = $product->category->name;
+                $nestedData['category'] = $product->category->name ?? '';
                 $nestedData['qty'] = $product->qty;
                 if($product->unit_id)
                     $nestedData['unit'] = $product->unit->unit_name;
