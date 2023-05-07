@@ -14,13 +14,8 @@ class AdjustmentController extends Controller
 {
     public function index(Request $request)
     {
-        $limit = $request->limit ?? 20;
-        $items = Adjustment::query(true);
-        if( $limit != -1 ){
-            $items = $items->paginate(20);
-        }else{
-            $items = $items->all();
-        }
+        $query = Adjustment::query(true)->orderBy('id','DESC');
+        $items = $this->handleFilter($query,$request);
         return AdjustmentResource::collection($items);
     }
 	public function show($id)
@@ -90,7 +85,54 @@ class AdjustmentController extends Controller
 	
 	public function destroy($id)
     {
-        $item = Adjustment::find($id)->delete();
+        $lims_adjustment_data = Adjustment::find($id);
+        $lims_product_adjustment_data = ProductAdjustment::where('adjustment_id', $id)->get();
+        foreach ($lims_product_adjustment_data as $key => $product_adjustment_data) {
+            $lims_product_data = Product::find($product_adjustment_data->product_id);
+            if($product_adjustment_data->variant_id) {
+                $lims_product_variant_data = ProductVariant::select('id', 'qty')->FindExactProduct($product_adjustment_data->product_id, $product_adjustment_data->variant_id)->first();
+                $lims_product_warehouse_data = Product_Warehouse::where([
+                        ['product_id', $product_adjustment_data->product_id],
+                        ['variant_id', $product_adjustment_data->variant_id],
+                        ['warehouse_id', $lims_adjustment_data->warehouse_id]
+                    ])->first();
+                if($product_adjustment_data->action == '-'){
+                    $lims_product_variant_data->qty += $product_adjustment_data->qty;
+                }
+                elseif($product_adjustment_data->action == '+'){
+                    $lims_product_variant_data->qty -= $product_adjustment_data->qty;
+                }
+                $lims_product_variant_data->save();
+            }
+            else {
+                $lims_product_warehouse_data = Product_Warehouse::where([
+                        ['product_id', $product_adjustment_data->product_id],
+                        ['warehouse_id', $lims_adjustment_data->warehouse_id]
+                    ])->first();
+            }
+            if($product_adjustment_data->action == '-'){
+                $lims_product_data->qty += $product_adjustment_data->qty;
+                $lims_product_warehouse_data->qty += $product_adjustment_data->qty;
+            }
+            elseif($product_adjustment_data->action == '+'){
+                $lims_product_data->qty -= $product_adjustment_data->qty;
+                $lims_product_warehouse_data->qty -= $product_adjustment_data->qty;
+            }
+            $lims_product_data->save();
+            $lims_product_warehouse_data->save();
+            $product_adjustment_data->delete();
+        }
+        $lims_adjustment_data->delete();
+        return response()->json([
+            'success' => true,
+            'data' => $lims_adjustment_data
+        ]);
+    }
+    public function changeStatus($id,Request $request){
+        $is_active = $request->is_active ?? 0;
+        $item = Adjustment::findOrFail($id);
+        $item->is_active = $is_active;
+        $item->save();
         return response()->json([
             'success' => true,
             'data' => $item

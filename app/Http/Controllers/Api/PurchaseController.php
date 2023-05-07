@@ -30,13 +30,8 @@ class PurchaseController extends Controller
    
     public function index(Request $request)
     {
-        $limit = $request->limit ?? 20;
-        $items = Purchase::query(true)->orderBy('id','DESC');
-        if( $limit != -1 ){
-            $items = $items->paginate(20);
-        }else{
-            $items = $items->all();
-        }
+        $query = Purchase::query(true)->orderBy('id','DESC');
+        $items = $this->handleFilter($query,$request);
         return PurchaseResource::collection($items);
     }
 	public function show($id)
@@ -50,13 +45,16 @@ class PurchaseController extends Controller
         $data = $request->except('document');
         $data['user_id'] = 1;
         $data['reference_no'] = 'pr-' . date("Ymd") . '-'. date("his");
+        $data['grand_total'] = str_replace(',','',$data['grand_total']);
+        $data['paid_amount'] = str_replace(',','',$data['paid_amount']);
         $saved = Purchase::create($data);
 
         $lims_purchase_data = Purchase::latest()->first();
         $product_id = $data['product_ids'];
         $product_code = $data['product_code'];
         $qty = $data['qty'];
-        $recieved = $data['recieved'];
+        // $recieved = $data['recieved'];
+        $recieved = $data['qty'];
         $purchase_unit = $data['purchase_unit'];
         $net_unit_cost = $data['net_unit_cost'];
         $discount = $data['discount'];
@@ -111,6 +109,10 @@ class PurchaseController extends Controller
 
             $lims_product_warehouse_data->save();
 
+            $discount[$i] = str_replace(',','',$discount[$i]);
+            $qty[$i] = str_replace(',','',$qty[$i]);
+            $net_unit_cost[$i] = str_replace(',','',$net_unit_cost[$i]);  
+
             $product_purchase['purchase_id'] = $lims_purchase_data->id ;
             $product_purchase['product_id'] = $id;
             $product_purchase['qty'] = $qty[$i];
@@ -133,6 +135,8 @@ class PurchaseController extends Controller
 	public function update($id,Request $request)
     {
         $data = $request->except('document');
+        $data['grand_total'] = str_replace(',','',$data['grand_total']);
+        $data['paid_amount'] = str_replace(',','',$data['paid_amount']);
         $balance = $data['grand_total'] - $data['paid_amount'];
         if ($balance < 0 || $balance > 0) {
             $data['payment_status'] = 1;
@@ -146,7 +150,8 @@ class PurchaseController extends Controller
         $product_id = $data['product_ids'];
         $product_code = $data['product_code'];
         $qty = $data['qty'];
-        $recieved = $data['recieved'];
+        // $recieved = $data['recieved'];
+        $recieved = $data['qty'];
         $purchase_unit = $data['purchase_unit'];
         $net_unit_cost = $data['net_unit_cost'];
         $discount = $data['discount'];
@@ -237,6 +242,10 @@ class PurchaseController extends Controller
 
             $lims_product_data->save();
 
+            $discount[$key] = str_replace(',','',$discount[$key]);
+            $qty[$key] = str_replace(',','',$qty[$key]);
+            $net_unit_cost[$key] = str_replace(',','',$net_unit_cost[$key]);   
+
             $product_purchase['purchase_id'] = $id ;
             $product_purchase['product_id'] = $pro_id;
             $product_purchase['qty'] = $qty[$key];
@@ -260,7 +269,118 @@ class PurchaseController extends Controller
 	
 	public function destroy($id)
     {
-        $item = Purchase::find($id)->delete();
+        $lims_purchase_data = Purchase::find($id);
+        $lims_product_purchase_data = ProductPurchase::where('purchase_id', $id)->get();
+        $lims_payment_data = Payment::where('purchase_id', $id)->get();
+        foreach ($lims_product_purchase_data as $product_purchase_data) {
+            $lims_purchase_unit_data = Unit::find($product_purchase_data->purchase_unit_id);
+            if ($lims_purchase_unit_data->operator == '*')
+                $recieved_qty = $product_purchase_data->recieved * $lims_purchase_unit_data->operation_value;
+            else
+                $recieved_qty = $product_purchase_data->recieved / $lims_purchase_unit_data->operation_value;
+
+            $lims_product_data = Product::find($product_purchase_data->product_id);
+            if($product_purchase_data->variant_id) {
+                $lims_product_variant_data = ProductVariant::select('id', 'qty')->FindExactProduct($lims_product_data->id, $product_purchase_data->variant_id)->first();
+                $lims_product_warehouse_data = Product_Warehouse::FindProductWithVariant($product_purchase_data->product_id, $product_purchase_data->variant_id, $lims_purchase_data->warehouse_id)
+                    ->first();
+                $lims_product_variant_data->qty -= $recieved_qty;
+                $lims_product_variant_data->save();
+            }
+            else {
+                $lims_product_warehouse_data = Product_Warehouse::FindProductWithoutVariant($product_purchase_data->product_id, $lims_purchase_data->warehouse_id)
+                    ->first();
+            }
+            
+            $lims_product_data->qty -= $recieved_qty;
+            $lims_product_warehouse_data->qty -= $recieved_qty;
+
+            $lims_product_warehouse_data->save();
+            $lims_product_data->save();
+            $product_purchase_data->delete();
+        }
+        foreach ($lims_payment_data as $payment_data) {
+            if($payment_data->paying_method == "Cheque"){
+                $payment_with_cheque_data = PaymentWithCheque::where('payment_id', $payment_data->id)->first();
+                $payment_with_cheque_data->delete();
+            }
+            elseif($payment_data->paying_method == "Credit Card"){
+                $payment_with_credit_card_data = PaymentWithCreditCard::where('payment_id', $payment_data->id)->first();
+                $lims_pos_setting_data = PosSetting::latest()->first();
+                \Stripe\Stripe::setApiKey($lims_pos_setting_data->stripe_secret_key);
+                \Stripe\Refund::create(array(
+                    "charge" => $payment_with_credit_card_data->charge_id,
+                ));
+
+                $payment_with_credit_card_data->delete();
+            }
+            $payment_data->delete();
+        }
+
+        $lims_purchase_data->delete();
+        return response()->json([
+            'success' => true,
+            'data' => $lims_purchase_data
+        ]);
+    }
+
+    public function allDue(Request $request)
+    {
+        $limit = $request->limit ?? 20;
+        $query = Purchase::orderBy('id','DESC')->where('payment_status','!=',4);
+        $items = $this->handleFilter($query,$request);
+        return PurchaseResource::collection($items);
+    }
+    public function getPayments($id){
+        $items = Payment::where('purchase_id', $id)->get();
+        return response()->json([
+            'success' => true,
+            'data' => $items
+        ]);
+    }
+    public function storePayment($id,Request $request){
+        $data = $request->except(['_token','_method']);
+        $data['paid_by_id'] = 1;
+        $data['account_id'] = 1;
+        $data['paying_amount'] = str_replace(',','',$data['paying_amount']);
+        $data['amount'] = str_replace(',','',$data['amount']);
+
+        $lims_purchase_data = Purchase::find($id);
+        $lims_purchase_data->paid_amount += $data['amount'];
+        $balance = $lims_purchase_data->grand_total - $lims_purchase_data->paid_amount;
+        if($balance > 0 || $balance < 0)
+            $lims_purchase_data->payment_status = 1;
+        elseif ($balance == 0)
+            // $lims_purchase_data->payment_status = 2;
+            $lims_purchase_data->payment_status = 4;
+        $lims_purchase_data->save();
+
+        $paying_method = 'Cash';
+
+        $lims_payment_data = new Payment();
+        $lims_payment_data->user_id = 1;
+        $lims_payment_data->purchase_id = $lims_purchase_data->id;
+        $lims_payment_data->account_id = $data['account_id'];
+        $lims_payment_data->payment_reference = 'ppr-' . date("Ymd") . '-'. date("his");
+        $lims_payment_data->amount = $data['amount'];
+        $lims_payment_data->change = $data['paying_amount'] - $data['amount'];
+        $lims_payment_data->paying_method = $paying_method;
+        $lims_payment_data->payment_note = $data['payment_note'];
+        $saved = $lims_payment_data->save();
+
+
+        return response()->json([
+            'success' => true,
+            'data' => $saved
+        ]);
+
+    }
+
+    public function changeStatus($id,Request $request){
+        $is_active = $request->is_active ?? 0;
+        $item = Purchase::findOrFail($id);
+        $item->is_active = $is_active;
+        $item->save();
         return response()->json([
             'success' => true,
             'data' => $item

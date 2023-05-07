@@ -22,6 +22,7 @@ class ReturnSaleResource extends JsonResource
         $data['customer_name']     = $this->customer->name;
         $data['customer_phone']     = $this->customer->phone_number;
         $data['customer_address']     = $this->customer->address;
+        $data['grand_total_format']        = number_format($this->grand_total);
         return $data;
     }
 }

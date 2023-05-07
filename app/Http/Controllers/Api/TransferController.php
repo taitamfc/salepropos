@@ -30,13 +30,8 @@ class TransferController extends Controller
 {
     public function index(Request $request)
     {
-        $limit = $request->limit ?? 20;
-        $items = Transfer::orderBy('id', 'desc');
-        if( $limit != -1 ){
-            $items = $items->paginate(20);
-        }else{
-            $items = $items->all();
-        }
+        $query = Transfer::query(true)->orderBy('id','DESC');
+        $items = $this->handleFilter($query,$request);
         return TransferResource::collection($items);
     }
 	public function show($id)
@@ -50,6 +45,7 @@ class TransferController extends Controller
         $data = $request->except(['_token','_method']);
         $data['user_id'] = 1;
         $data['reference_no'] = 'tr-' . date("Ymd") . '-'. date("his");
+        $data['shipping_cost'] = str_replace(',','',$data['shipping_cost']);
         $saved = Transfer::create($data);
 
         $lims_transfer_data = Transfer::latest()->first();
@@ -117,6 +113,9 @@ class TransferController extends Controller
                 $lims_product_warehouse_data->save();
             }
 
+            $qty[$i] = str_replace(',','',$qty[$i]);
+            $net_unit_cost[$i] = str_replace(',','',$net_unit_cost[$i]);  
+
             $product_transfer['transfer_id'] = $lims_transfer_data->id ;
             $product_transfer['product_id'] = $id;
             $product_transfer['qty'] = $qty[$i];
@@ -137,6 +136,7 @@ class TransferController extends Controller
 	public function update($id,Request $request)
     {
         $data = $request->except(['_token','_method']);
+        $data['shipping_cost'] = str_replace(',','',$data['shipping_cost']);
         $lims_transfer_data = Transfer::find($id);
         
         $lims_product_transfer_data = ProductTransfer::where('transfer_id', $id)->get();
@@ -254,6 +254,9 @@ class TransferController extends Controller
                 $lims_product_from_warehouse_data->save();
             }
 
+            $qty[$key] = str_replace(',','',$qty[$key]);
+            $net_unit_cost[$key] = str_replace(',','',$net_unit_cost[$key]);  
+
             $product_transfer['product_id'] = $pro_id;
             $product_transfer['variant_id'] = $variant_id;
             $product_transfer['transfer_id'] = $id;
@@ -290,7 +293,58 @@ class TransferController extends Controller
 	
 	public function destroy($id)
     {
-        $item = Transfer::find($id)->delete();
+        $lims_transfer_data =Transfer::find($id);
+        $lims_product_transfer_data = ProductTransfer::where('transfer_id', $id)->get();
+        foreach ($lims_product_transfer_data as $product_transfer_data) {
+            $lims_transfer_unit_data = Unit::find($product_transfer_data->purchase_unit_id);
+            if ($lims_transfer_unit_data->operator == '*') {
+                $quantity = $product_transfer_data->qty * $lims_transfer_unit_data->operation_value;
+            } else {
+                $quantity = $product_transfer_data / $lims_transfer_unit_data->operation_value;
+            }
+
+            if($lims_transfer_data->status == 1) {
+                //add quantity for from warehouse
+                if($product_transfer_data->variant_id)
+                    $lims_product_warehouse_data = Product_Warehouse::FindProductWithVariant($product_transfer_data->product_id, $product_transfer_data->variant_id, $lims_transfer_data->from_warehouse_id)->first();
+                else
+                    $lims_product_warehouse_data = Product_Warehouse::FindProductWithoutVariant($product_transfer_data->product_id, $lims_transfer_data->from_warehouse_id)->first();
+                $lims_product_warehouse_data->qty += $quantity;
+                $lims_product_warehouse_data->save();
+                //deduct quantity for to warehouse
+                if($product_transfer_data->variant_id)
+                    $lims_product_warehouse_data = Product_Warehouse::FindProductWithVariant($product_transfer_data->product_id, $product_transfer_data->variant_id, $lims_transfer_data->to_warehouse_id)->first();
+                else
+                    $lims_product_warehouse_data = Product_Warehouse::FindProductWithoutVariant($product_transfer_data->product_id, $lims_transfer_data->to_warehouse_id)->first();
+
+                $lims_product_warehouse_data->qty -= $quantity;
+                $lims_product_warehouse_data->save();
+            }
+            elseif($lims_transfer_data->status == 3) {
+                //add quantity for from warehouse
+                if($product_transfer_data->variant_id)
+                    $lims_product_warehouse_data = Product_Warehouse::FindProductWithVariant($product_transfer_data->product_id, $product_transfer_data->variant_id, $lims_transfer_data->from_warehouse_id)->first();
+                else
+                    $lims_product_warehouse_data = Product_Warehouse::FindProductWithoutVariant($product_transfer_data->product_id, $lims_transfer_data->from_warehouse_id)->first();
+
+                $lims_product_warehouse_data->qty += $quantity;
+                $lims_product_warehouse_data->save();
+            }
+            $product_transfer_data->delete();
+        }
+        $lims_transfer_data->delete();
+        
+        return response()->json([
+            'success' => true,
+            'data' => $lims_transfer_data
+        ]);
+    }
+
+    public function changeStatus($id,Request $request){
+        $is_active = $request->is_active ?? 0;
+        $item = Transfer::findOrFail($id);
+        $item->is_active = $is_active;
+        $item->save();
         return response()->json([
             'success' => true,
             'data' => $item

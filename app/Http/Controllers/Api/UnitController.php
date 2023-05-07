@@ -11,13 +11,8 @@ class UnitController extends Controller
 {
     public function index(Request $request)
     {
-        $limit = $request->limit ?? 20;
-        $items = Unit::query(true);
-        if( $limit != -1 ){
-            $items = $items->paginate(20);
-        }else{
-            $items = $items->all();
-        }
+        $query = Unit::query(true)->orderBy('id','DESC');
+        $items = $this->handleFilter($query,$request);
         return UnitResource::collection($items);
     }
 	public function show($id)
@@ -48,7 +43,19 @@ class UnitController extends Controller
 	
 	public function destroy($id)
     {
-        $item = Unit::find($id)->delete();
+        $lims_unit_data = Unit::findOrFail($id);
+        $lims_unit_data->is_active = false;
+        $lims_unit_data->save();
+        return response()->json([
+            'success' => true,
+            'data' => $lims_unit_data
+        ]);
+    }
+    public function changeStatus($id,Request $request){
+        $is_active = $request->is_active ?? 0;
+        $item = Unit::findOrFail($id);
+        $item->is_active = $is_active;
+        $item->save();
         return response()->json([
             'success' => true,
             'data' => $item

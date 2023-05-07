@@ -20,6 +20,7 @@ class ProductPurchaseResource extends JsonResource
         $data['id'] = $this->product->id ?? '';
         $data['price'] = $this->net_unit_cost ?? '';
         $data['unit_id'] = $this->product->unit_id ?? '';
+        $data['cr_qty'] = $this->qty ?? 1;
         return $data;
     }
 }

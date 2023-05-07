@@ -26,6 +26,8 @@ class TransferResource extends JsonResource
         $data['to_warehouse_name'] = $this->toWarehouse->name ?? '';
         $data['status_name']        = $this->statues[$this->status] ?? '';
         $data['products']           = ProductPurchaseResource::collection($this->products);
+        $data['created_at_format']         = date('d/m/Y H:i',strtotime($data['created_at']));
+        $data['grand_total_format']         = number_format($this->grand_total);
         return $data;
     }
 }

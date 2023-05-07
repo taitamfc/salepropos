@@ -11,13 +11,8 @@ class SupplierController extends Controller
 {
     public function index(Request $request)
     {
-        $limit = $request->limit ?? 20;
-        $items = Supplier::query(true);
-        if( $limit != -1 ){
-            $items = $items->paginate(20);
-        }else{
-            $items = $items->all();
-        }
+        $query = Supplier::query(true)->orderBy('id','DESC');
+        $items = $this->handleFilter($query,$request);
         return SupplierResource::collection($items);
     }
 	public function show($id)
@@ -48,7 +43,19 @@ class SupplierController extends Controller
 	
 	public function destroy($id)
     {
-        $item = Supplier::find($id)->delete();
+        $item = Supplier::findOrFail($id);
+        $item->is_active = false;
+        $item->save();
+        return response()->json([
+            'success' => true,
+            'data' => $item
+        ]);
+    }
+    public function changeStatus($id,Request $request){
+        $is_active = $request->is_active ?? 0;
+        $item = Supplier::findOrFail($id);
+        $item->is_active = $is_active;
+        $item->save();
         return response()->json([
             'success' => true,
             'data' => $item

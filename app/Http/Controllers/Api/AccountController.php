@@ -11,13 +11,8 @@ class AccountController extends Controller
 {
     public function index(Request $request)
     {
-        $limit = $request->limit ?? 20;
-        $items = Account::query(true)->orderBy('id','DESC');
-        if( $limit != -1 ){
-            $items = $items->paginate(20);
-        }else{
-            $items = $items->all();
-        }
+        $query = Account::query(true)->orderBy('id','DESC');
+        $items = $this->handleFilter($query,$request);
         return AccountResource::collection($items);
     }
 	public function show($id)
@@ -48,7 +43,19 @@ class AccountController extends Controller
 	
 	public function destroy($id)
     {
-        $item = Account::find($id)->delete();
+        $item = Account::findOrFail($id);
+        $item->is_active = 0;
+        $item->save();
+        return response()->json([
+            'success' => true,
+            'data' => $item
+        ]);
+    }
+    public function changeStatus($id,Request $request){
+        $is_active = $request->is_active ?? 0;
+        $item = Account::findOrFail($id);
+        $item->is_active = $is_active;
+        $item->save();
         return response()->json([
             'success' => true,
             'data' => $item

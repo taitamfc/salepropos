@@ -84,7 +84,7 @@
 					<div class="mt-3">
 						<p class="mt-2"><?php echo e(trans('file.Sale')); ?> <span class="float-right"><?php echo e(number_format((float)$sale[0]->grand_total, 2, '.', '')); ?></span></p>
 						<p class="mt-2"><?php echo e(trans('file.Purchase')); ?> <span class="float-right">- <?php echo e(number_format((float)$purchase[0]->grand_total, 2, '.', '')); ?></span></p>
-						<p class="mt-2"><?php echo e(trans('file.profit')); ?> <span class="float-right"> <?php echo e(number_format((float)($sale[0]->grand_total - $purchase[0]->grand_total), 2, '.', '')); ?></span></p>
+						<p class="mt-2"><?php echo e(trans('file.profit')); ?> 1 <span class="float-right"> <?php echo e(number_format((float)($sale[0]->grand_total - $purchase[0]->grand_total), 2, '.', '')); ?></span></p>
 					</div>
 				</div>
 			</div>
@@ -98,7 +98,7 @@
 						<p class="mt-2"><?php echo e(trans('file.Purchase')); ?> <span class="float-right">- <?php echo e(number_format((float)$purchase[0]->grand_total, 2, '.', '')); ?></span></p>
 						<p class="mt-2"><?php echo e(trans('file.Sale Return')); ?> <span class="float-right">- <?php echo e(number_format((float)$return[0]->grand_total, 2, '.', '')); ?></span></p>
 						<p class="mt-2"><?php echo e(trans('file.Purchase Return')); ?> <span class="float-right"> <?php echo e(number_format((float)$purchase_return[0]->grand_total, 2, '.', '')); ?></span></p>
-						<p class="mt-2"><?php echo e(trans('file.profit')); ?> <span class="float-right"> <?php echo e(number_format((float)($sale[0]->grand_total - $purchase[0]->grand_total - $return[0]->grand_total + $purchase_return[0]->grand_total), 2, '.', '')); ?></span></p>
+						<p class="mt-2"><?php echo e(trans('file.profit')); ?> 2 <span class="float-right"> <?php echo e(number_format((float)($sale[0]->grand_total - $purchase[0]->grand_total - $return[0]->grand_total + $purchase_return[0]->grand_total), 2, '.', '')); ?></span></p>
 					</div>
 				</div>
 			</div>

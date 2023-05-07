@@ -25,4 +25,8 @@ class ReturnPurchase extends Model
     {
     	return $this->belongsTo('App\User');
     }
+    public function products()
+    {
+    	return $this->hasMany('App\PurchaseProductReturn','return_id');
+    }
 }

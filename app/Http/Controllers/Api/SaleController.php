@@ -10,21 +10,20 @@ use App\Customer;
 use App\Unit;
 use App\Product;
 use App\Product_Warehouse;
+use App\Payment;
+use App\CashRegister;
+use App\Delivery;
 use App\Http\Resources\SaleResource;
 
 class SaleController extends Controller
 {
     public function index(Request $request)
     {
-        $limit = $request->limit ?? 20;
-        $items = Sale::query(true)->orderBy('id','DESC');
-        if( $limit != -1 ){
-            $items = $items->paginate(20);
-        }else{
-            $items = $items->all();
-        }
+        $query = Sale::query(true)->orderBy('id','DESC');
+        $items = $this->handleFilter($query,$request);
         return SaleResource::collection($items);
     }
+
 	public function show($id)
     {
         $item = Sale::find($id);
@@ -37,6 +36,9 @@ class SaleController extends Controller
         $data['sale_status'] = 1;
         $data['user_id'] = 1;
         $data['reference_no'] = 'posr-' . date("Ymd") . '-'. date("his");
+        $data['grand_total'] = str_replace(',','',$data['grand_total']);
+        $data['paid_amount'] = str_replace(',','',$data['paid_amount']);
+        $data['shipping_cost'] = str_replace(',','',$data['shipping_cost']);
         $balance = $data['grand_total'] - $data['paid_amount'];
         if($balance > 0 || $balance < 0){
             $data['payment_status'] = 2;
@@ -136,6 +138,11 @@ class SaleController extends Controller
             else
                 $mail_data['unit'][$i] = '';
 
+            
+            $discount[$i] = str_replace(',','',$discount[$i]);
+            $qty[$i] = str_replace(',','',$qty[$i]);
+            $net_unit_price[$i] = str_replace(',','',$net_unit_price[$i]);
+
             $product_sale['sale_id'] = $lims_sale_data->id ;
             $product_sale['product_id'] = $id;
             $product_sale['qty'] = $mail_data['qty'][$i] = $qty[$i];
@@ -160,6 +167,9 @@ class SaleController extends Controller
     {
         $data = $request->except(['_token','_method']);
         $data['sale_status'] = 1;
+        $data['grand_total'] = str_replace(',','',$data['grand_total']);
+        $data['paid_amount'] = str_replace(',','',$data['paid_amount']);
+        $data['shipping_cost'] = str_replace(',','',$data['shipping_cost']);
         $balance = $data['grand_total'] - $data['paid_amount'];
         if($balance < 0 || $balance > 0)
             $data['payment_status'] = 2;
@@ -299,6 +309,10 @@ class SaleController extends Controller
             else
                 $mail_data['unit'][$key] = '';
 
+            $discount[$key] = str_replace(',','',$discount[$key]);
+            $qty[$key] = str_replace(',','',$qty[$key]);
+            $net_unit_price[$key] = str_replace(',','',$net_unit_price[$key]);    
+
             $product_sale['sale_id'] = $id ;
             $product_sale['product_id'] = $pro_id;
             $product_sale['qty'] = $mail_data['qty'][$key] = $qty[$key];
@@ -334,11 +348,160 @@ class SaleController extends Controller
 	
 	public function destroy($id)
     {
-        $item = Sale::find($id)->delete();
+        $lims_sale_data = Sale::find($id);
+        $lims_product_sale_data = Product_Sale::where('sale_id', $id)->get();
+        $lims_delivery_data = Delivery::where('sale_id',$id)->first();
+        if($lims_sale_data->sale_status == 3)
+            $message = 'Draft deleted successfully';
+        else
+            $message = 'Sale deleted successfully';
+        foreach ($lims_product_sale_data as $product_sale) {
+            $lims_product_data = Product::find($product_sale->product_id);
+            //adjust product quantity
+            if( ($lims_sale_data->sale_status == 1) && ($lims_product_data->type == 'combo') ){
+                $product_list = explode(",", $lims_product_data->product_list);
+                $qty_list = explode(",", $lims_product_data->qty_list);
+
+                foreach ($product_list as $index=>$child_id) {
+                    $child_data = Product::find($child_id);
+                    $child_warehouse_data = Product_Warehouse::where([
+                        ['product_id', $child_id],
+                        ['warehouse_id', $lims_sale_data->warehouse_id ],
+                        ])->first();
+
+                    $child_data->qty += $product_sale->qty * $qty_list[$index];
+                    $child_warehouse_data->qty += $product_sale->qty * $qty_list[$index];
+
+                    $child_data->save();
+                    $child_warehouse_data->save();
+                }
+            }
+            elseif(($lims_sale_data->sale_status == 1) && ($product_sale->sale_unit_id != 0)){
+                $lims_sale_unit_data = Unit::find($product_sale->sale_unit_id);
+                if ($lims_sale_unit_data->operator == '*')
+                    $product_sale->qty = $product_sale->qty * $lims_sale_unit_data->operation_value;
+                else
+                    $product_sale->qty = $product_sale->qty / $lims_sale_unit_data->operation_value;
+                if($product_sale->variant_id) {
+                    $lims_product_variant_data = ProductVariant::select('id', 'qty')->FindExactProduct($lims_product_data->id, $product_sale->variant_id)->first();
+                    $lims_product_warehouse_data = Product_Warehouse::FindProductWithVariant($lims_product_data->id, $product_sale->variant_id, $lims_sale_data->warehouse_id)->first();
+                    $lims_product_variant_data->qty += $product_sale->qty;
+                    $lims_product_variant_data->save();
+                }
+                else {
+                    $lims_product_warehouse_data = Product_Warehouse::FindProductWithoutVariant($lims_product_data->id, $lims_sale_data->warehouse_id)->first();
+                }
+                    
+                $lims_product_data->qty += $product_sale->qty;
+                $lims_product_warehouse_data->qty += $product_sale->qty;
+                $lims_product_data->save();
+                $lims_product_warehouse_data->save();
+            }
+            $product_sale->delete();
+        }
+        $lims_payment_data = Payment::where('sale_id', $id)->get();
+        foreach ($lims_payment_data as $payment) {
+            if($payment->paying_method == 'Gift Card'){
+                $lims_payment_with_gift_card_data = PaymentWithGiftCard::where('payment_id', $payment->id)->first();
+                $lims_gift_card_data = GiftCard::find($lims_payment_with_gift_card_data->gift_card_id);
+                $lims_gift_card_data->expense -= $payment->amount;
+                $lims_gift_card_data->save();
+                $lims_payment_with_gift_card_data->delete();
+            }
+            elseif($payment->paying_method == 'Cheque'){
+                $lims_payment_cheque_data = PaymentWithCheque::where('payment_id', $payment->id)->first();
+                $lims_payment_cheque_data->delete();
+            }
+            elseif($payment->paying_method == 'Credit Card'){
+                $lims_payment_with_credit_card_data = PaymentWithCreditCard::where('payment_id', $payment->id)->first();
+                $lims_payment_with_credit_card_data->delete();
+            }
+            elseif($payment->paying_method == 'Paypal'){
+                $lims_payment_paypal_data = PaymentWithPaypal::where('payment_id', $payment->id)->first();
+                if($lims_payment_paypal_data)
+                    $lims_payment_paypal_data->delete();
+            }
+            elseif($payment->paying_method == 'Deposit'){
+                $lims_customer_data = Customer::find($lims_sale_data->customer_id);
+                $lims_customer_data->expense -= $payment->amount;
+                $lims_customer_data->save();
+            }
+            $payment->delete();
+        }
+        if($lims_delivery_data)
+            $lims_delivery_data->delete();
+        if($lims_sale_data->coupon_id) {
+            $lims_coupon_data = Coupon::find($lims_sale_data->coupon_id);
+            $lims_coupon_data->used -= 1;
+            $lims_coupon_data->save();
+        }
+        $lims_sale_data->delete();
         return response()->json([
             'success' => true,
-            'data' => $item
+            'data' => $lims_sale_data
         ]);
+    }
+
+    public function allDue(Request $request)
+    {
+        $limit = $request->limit ?? 20;
+        $query = Sale::orderBy('id','DESC')->where('payment_status','!=',4);
+        $items = $this->handleFilter($query,$request);
+        return SaleResource::collection($items);
+    }
+    public function getPayments($id){
+        $items = Payment::where('sale_id', $id)->get();
+        return response()->json([
+            'success' => true,
+            'data' => $items
+        ]);
+    }
+    public function storePayment($id,Request $request){
+        $data = $request->except(['_token','_method']);
+        $data['paid_by_id'] = 1;
+        $data['account_id'] = 1;
+        $data['paying_amount'] = str_replace(',','',$data['paying_amount']);
+        $data['amount'] = str_replace(',','',$data['amount']);
+
+        
+
+        $lims_sale_data = Sale::find($id);
+        $lims_customer_data = Customer::find($lims_sale_data->customer_id);
+        $lims_sale_data->paid_amount += $data['amount'];
+        $balance = $lims_sale_data->grand_total - $lims_sale_data->paid_amount;
+        if($balance > 0 || $balance < 0)
+            $lims_sale_data->payment_status = 2;
+        elseif ($balance == 0)
+            $lims_sale_data->payment_status = 4;
+
+        $paying_method = 'Cash';
+
+        $cash_register_data = CashRegister::where([
+            ['user_id',1],
+            ['warehouse_id', $lims_sale_data->warehouse_id],
+            ['status', true]
+        ])->first();
+
+        $lims_payment_data = new Payment();
+        $lims_payment_data->user_id =1;
+        $lims_payment_data->sale_id = $lims_sale_data->id;
+        if($cash_register_data)
+            $lims_payment_data->cash_register_id = $cash_register_data->id;
+        $lims_payment_data->account_id = $data['account_id'];
+        $data['payment_reference'] = 'spr-' . date("Ymd") . '-'. date("his");
+        $lims_payment_data->payment_reference = $data['payment_reference'];
+        $lims_payment_data->amount = $data['amount'];
+        $lims_payment_data->change = $data['paying_amount'] - $data['amount'];
+        $lims_payment_data->paying_method = $paying_method;
+        $lims_payment_data->payment_note = $data['payment_note'];
+        $saved = $lims_payment_data->save();
+        $lims_sale_data->save();
+
+        return response()->json([
+            'success' => true,
+            'data' => $saved
+        ]);
+
     }
 
     public function createOrGetCustomer($data){
@@ -352,5 +515,16 @@ class SaleController extends Controller
             $customer->save();
         }
         return $customer->id;
+    }
+
+    public function changeStatus($id,Request $request){
+        $is_active = $request->is_active ?? 0;
+        $item = Sale::findOrFail($id);
+        $item->is_active = $is_active;
+        $item->save();
+        return response()->json([
+            'success' => true,
+            'data' => $item
+        ]);
     }
 }

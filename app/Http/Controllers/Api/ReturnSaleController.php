@@ -19,13 +19,8 @@ class ReturnSaleController extends Controller
 {
     public function index(Request $request)
     {
-        $limit = $request->limit ?? 20;
-        $items = ReturnSale::query(true)->orderBy('id','DESC');
-        if( $limit != -1 ){
-            $items = $items->paginate(20);
-        }else{
-            $items = $items->all();
-        }
+        $query = ReturnSale::query(true)->orderBy('id','DESC');
+        $items = $this->handleFilter($query,$request);
         return ReturnSaleResource::collection($items);
     }
 	public function show($id)
@@ -39,6 +34,7 @@ class ReturnSaleController extends Controller
         $data = $request->except(['_token','_method']);
         $data['reference_no'] = 'rr-' . date("Ymd") . '-'. date("his");
         $data['user_id'] = 1;
+        $data['grand_total'] = str_replace(',','',$data['grand_total']);
         $data['customer_id'] = $this->createOrGetCustomer($data);
         $cash_register_data = CashRegister::where([
             ['user_id', $data['user_id']],
@@ -136,10 +132,27 @@ class ReturnSaleController extends Controller
             else
                 $mail_data['unit'][$key] = '';
 
+            $discount[$key] = str_replace(',','',$discount[$key]);
+            $qty[$key] = str_replace(',','',$qty[$key]);
+            $net_unit_price[$key] = str_replace(',','',$net_unit_price[$key]);
+
             $mail_data['qty'][$key] = $qty[$key];
             $mail_data['total'][$key] = $total[$key];
             ProductReturn::insert(
-                ['return_id' => $lims_return_data->id, 'product_id' => $pro_id, 'variant_id' => $variant_id, 'qty' => $qty[$key], 'sale_unit_id' => $sale_unit_id, 'net_unit_price' => $net_unit_price[$key], 'discount' => $discount[$key], 'tax_rate' => $tax_rate[$key], 'tax' => $tax[$key], 'total' => $total[$key], 'created_at' => \Carbon\Carbon::now(),  'updated_at' => \Carbon\Carbon::now()]
+                [
+                    'return_id' => $lims_return_data->id, 
+                    'product_id' => $pro_id, 
+                    'variant_id' => $variant_id, 
+                    'qty' => $qty[$key], 
+                    'sale_unit_id' => $sale_unit_id, 
+                    'net_unit_price' => $net_unit_price[$key], 
+                    'discount' => $discount[$key], 
+                    'tax_rate' => $tax_rate[$key], 
+                    'tax' => $tax[$key], 
+                    'total' => $total[$key], 
+                    'created_at' => \Carbon\Carbon::now(),  
+                    'updated_at' => \Carbon\Carbon::now()
+                ]
             );
         }
         return response()->json([
@@ -282,6 +295,10 @@ class ReturnSaleController extends Controller
             else
                 $mail_data['unit'][$key] = '';
 
+            $discount[$key] = str_replace(',','',$discount[$key]);
+            $qty[$key] = str_replace(',','',$qty[$key]);
+            $net_unit_price[$key] = str_replace(',','',$net_unit_price[$key]);
+
             $mail_data['qty'][$key] = $qty[$key];
             $mail_data['total'][$key] = $total[$key];
 
@@ -320,10 +337,57 @@ class ReturnSaleController extends Controller
 	
 	public function destroy($id)
     {
-        $item = ReturnSale::find($id)->delete();
+        $lims_return_data = ReturnSale::find($id);
+        $lims_product_return_data = ProductReturn::where('return_id', $id)->get();
+
+        foreach ($lims_product_return_data as $key => $product_return_data) {
+            $lims_product_data = Product::find($product_return_data->product_id);
+            if( $lims_product_data->type == 'combo' ){
+                $product_list = explode(",", $lims_product_data->product_list);
+                $qty_list = explode(",", $lims_product_data->qty_list);
+
+                foreach ($product_list as $index=>$child_id) {
+                    $child_data = Product::find($child_id);
+                    $child_warehouse_data = Product_Warehouse::where([
+                        ['product_id', $child_id],
+                        ['warehouse_id', $lims_return_data->warehouse_id ],
+                        ])->first();
+
+                    $child_data->qty -= $product_return_data->qty * $qty_list[$index];
+                    $child_warehouse_data->qty -= $product_return_data->qty * $qty_list[$index];
+
+                    $child_data->save();
+                    $child_warehouse_data->save();
+                }
+            }
+            elseif($product_return_data->sale_unit_id != 0){
+                $lims_sale_unit_data = Unit::find($product_return_data->sale_unit_id);
+
+                if ($lims_sale_unit_data->operator == '*')
+                    $quantity = $product_return_data->qty * $lims_sale_unit_data->operation_value;
+                elseif($lims_sale_unit_data->operator == '/')
+                    $quantity = $product_return_data->qty / $lims_sale_unit_data->operation_value;
+                
+                if($product_return_data->variant_id) {
+                    $lims_product_variant_data = ProductVariant::select('id', 'qty')->FindExactProduct($product_return_data->product_id, $product_return_data->variant_id)->first();
+                    $lims_product_warehouse_data = Product_Warehouse::FindProductWithVariant($product_return_data->product_id, $product_return_data->variant_id, $lims_return_data->warehouse_id)->first();
+                    $lims_product_variant_data->qty -= $quantity;
+                    $lims_product_variant_data->save();
+                }
+                else
+                    $lims_product_warehouse_data = Product_Warehouse::FindProductWithoutVariant($product_return_data->product_id, $lims_return_data->warehouse_id)->first();
+
+                $lims_product_data->qty -= $quantity;
+                $lims_product_warehouse_data->qty -= $quantity;
+                $lims_product_data->save();
+                $lims_product_warehouse_data->save();
+                $product_return_data->delete();
+            }
+        }
+        $lims_return_data->delete();
         return response()->json([
             'success' => true,
-            'data' => $item
+            'data' => $lims_return_data
         ]);
     }
 
@@ -338,5 +402,16 @@ class ReturnSaleController extends Controller
             $customer->save();
         }
         return $customer->id;
+    }
+
+    public function changeStatus($id,Request $request){
+        $is_active = $request->is_active ?? 0;
+        $item = ReturnSale::findOrFail($id);
+        $item->is_active = $is_active;
+        $item->save();
+        return response()->json([
+            'success' => true,
+            'data' => $item
+        ]);
     }
 }

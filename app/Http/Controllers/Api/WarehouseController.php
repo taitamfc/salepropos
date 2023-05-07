@@ -11,13 +11,8 @@ class WarehouseController extends Controller
 {
     public function index(Request $request)
     {
-        $limit = $request->limit ?? 20;
-        $items = Warehouse::query(true);
-        if( $limit != -1 ){
-            $items = $items->paginate(20);
-        }else{
-            $items = $items->all();
-        }
+        $query = Warehouse::query(true)->orderBy('id','ASC');
+        $items = $this->handleFilter($query,$request);
         return WarehouseResource::collection($items);
     }
 	public function show($id)
@@ -52,7 +47,19 @@ class WarehouseController extends Controller
 	
 	public function destroy($id)
     {
-        $item = Warehouse::find($id)->delete();
+        $item = Warehouse::findOrFail($id);
+        $item->is_active = false;
+        $item->save();
+        return response()->json([
+            'success' => true,
+            'data' => $item
+        ]);
+    }
+    public function changeStatus($id,Request $request){
+        $is_active = $request->is_active ?? 0;
+        $item = Warehouse::findOrFail($id);
+        $item->is_active = $is_active;
+        $item->save();
         return response()->json([
             'success' => true,
             'data' => $item

@@ -5,15 +5,15 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Category;
+use App\Product;
 use App\Http\Resources\CategoryResource;
 
 class CategoryController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        $items = Category::query(true)->orderBy('id','DESC');
-
-        $items = $items->paginate(20);
+        $query = Category::query(true)->orderBy('id','DESC');
+        $items = $this->handleFilter($query,$request);
         return CategoryResource::collection($items);
     }
 	public function show($id)
@@ -70,7 +70,39 @@ class CategoryController extends Controller
 	
 	public function destroy($id)
     {
-        $item = Category::find($id)->delete();
+        $lims_category_data = Category::findOrFail($id);
+        $lims_category_data->is_active = false;
+        $lims_product_data = Product::where('category_id', $id)->get();
+        foreach ($lims_product_data as $product_data) {
+            $product_data->is_active = false;
+            $product_data->save();
+        }
+        $lims_category_data->save();
+        return response()->json([
+            'success' => true,
+            'data' => $lims_category_data
+        ]);
+    }
+    public function changeStatus($id,Request $request){
+        $is_active = $request->is_active ?? 0;
+        $item = Category::findOrFail($id);
+        $item->is_active = $is_active;
+
+        if( $is_active ){
+            $lims_product_data = Product::where('category_id', $id)->get();
+            foreach ($lims_product_data as $product_data) {
+                $product_data->is_active = true;
+                $product_data->save();
+            }
+        }else{
+            $lims_product_data = Product::where('category_id', $id)->get();
+            foreach ($lims_product_data as $product_data) {
+                $product_data->is_active = false;
+                $product_data->save();
+            }
+        }
+
+        $item->save();
         return response()->json([
             'success' => true,
             'data' => $item

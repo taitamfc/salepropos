@@ -14,11 +14,7 @@ class UnitResource extends JsonResource
      */
     public function toArray($request)
     {
-        $data = [
-            'id'        => $this->id,
-            'unit_name' => $this->unit_name,
-            'unit_code' => $this->unit_code,
-        ];
+        $data = parent::toArray($request);
         return $data;
     }
 }
